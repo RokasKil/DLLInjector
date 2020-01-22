@@ -18,6 +18,7 @@ int findProcess(Process* target, bool byPid, DWORD pid, string pName);
 int findProcess(Process* target, DWORD pid);
 int findProcess(Process* target, string pName);
 Process parseProcess(DWORD processID);
+int injectDll(DWORD pid, string dllLocation);
 
 int main(int argc, char** argv) {
 	string dllFile = "";
@@ -64,8 +65,9 @@ int main(int argc, char** argv) {
 	if (result != 0) {
 		return closeInjector(result);
 	}
-	cout << "Proccess found " << target.pid << " " << target.name << endl;
-	return closeInjector(INJECTOR_OK);
+	//cout << "Proccess found " << target.pid << " " << target.name << endl;
+	result = injectDll(target.pid, dllFile);
+	return closeInjector(result);
 }
 
 
@@ -87,6 +89,12 @@ int closeInjector(int error) {
 		break;
 	case INJECTOR_FAILED_TO_GET_PROCESSES:
 		cout << "ERROR: Failed to get processes" << endl;
+		break;
+	case INJECTOR_FAILED_TO_OPEN_PROCESS:
+		cout << "ERROR: Failed to get process handle" << endl;
+		break;
+	case INJECTOR_FAILED_TO_INJECT:
+		cout << "ERROR: Failed to inject dll" << endl;
 		break;
 	}
 	return error;
@@ -158,4 +166,63 @@ int findProcess(Process* target, DWORD pid) {
 }
 int findProcess(Process* target, string pName) {
 	return findProcess(target, false, -1, pName);
+}
+
+int injectDll(DWORD pid, string dllLocation) {
+	HANDLE hThread;
+	void* pLibRemote;   // The address (in the remote process)
+						// where szLibPath will be copied to;
+	DWORD hLibModule;   // Base address of loaded module (==HMODULE);
+
+	// initialize szLibPath
+	//...PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_WRITE, and PROCESS_VM_READ
+
+	// 1. Allocate memory in the remote process for szLibPath
+	// 2. Write szLibPath to the allocated memory
+
+	HANDLE hProcess = OpenProcess(
+		PROCESS_CREATE_THREAD |
+		PROCESS_QUERY_INFORMATION |
+		PROCESS_VM_OPERATION |
+		PROCESS_VM_WRITE |
+		PROCESS_VM_READ,
+		FALSE, pid);
+	if (hProcess == NULL) {
+		return INJECTOR_FAILED_TO_OPEN_PROCESS;
+	}
+	pLibRemote = VirtualAllocEx(hProcess, NULL, dllLocation.length() + 1,
+		MEM_COMMIT, PAGE_READWRITE);
+	if (pLibRemote == NULL) {
+		return INJECTOR_FAILED_TO_INJECT;
+	}
+	
+	WriteProcessMemory(hProcess, pLibRemote, (void*)dllLocation.c_str(),
+		dllLocation.length() + 1, NULL);
+
+
+	// Load dll into the remote process
+	hThread = CreateRemoteThread(hProcess, NULL, 0,
+		(LPTHREAD_START_ROUTINE)GetProcAddress(GetModuleHandleA("Kernel32"), "LoadLibraryA"),
+		pLibRemote, 0, NULL);
+
+	if (hThread == NULL) {
+		return INJECTOR_FAILED_TO_INJECT;
+	}
+
+	WaitForSingleObject(hThread, INFINITE);
+
+	// Get handle of the loaded module
+	GetExitCodeThread(hThread, &hLibModule);
+	if (hLibModule == NULL) {
+		return INJECTOR_FAILED_TO_INJECT;
+	}
+	else {
+		cout << hex << "0x" << hLibModule << endl;
+	}
+	// Clean up
+	CloseHandle(hThread);
+	VirtualFreeEx(hProcess, pLibRemote,
+		dllLocation.length() + 1, MEM_RELEASE);
+
+	return INJECTOR_OK;
 }
