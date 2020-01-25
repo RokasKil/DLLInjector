@@ -193,6 +193,7 @@ int injectDll(DWORD pid, string dllLocation) {
 	pLibRemote = VirtualAllocEx(hProcess, NULL, dllLocation.length() + 1,
 		MEM_COMMIT, PAGE_READWRITE);
 	if (pLibRemote == NULL) {
+		cout << "Failed to allocate memory" << endl;
 		return INJECTOR_FAILED_TO_INJECT;
 	}
 	
@@ -206,6 +207,7 @@ int injectDll(DWORD pid, string dllLocation) {
 		pLibRemote, 0, NULL);
 
 	if (hThread == NULL) {
+		cout << "Failed to Create Remote Thread" << endl;
 		return INJECTOR_FAILED_TO_INJECT;
 	}
 
@@ -214,6 +216,8 @@ int injectDll(DWORD pid, string dllLocation) {
 	// Get handle of the loaded module
 	GetExitCodeThread(hThread, &hLibModule);
 	if (hLibModule == NULL) {
+		hLibModule = -1;
+		cout << "LoadLibraryA failed" << endl;
 		return INJECTOR_FAILED_TO_INJECT;
 	}
 	else {
