@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
 	if (result != 0) {
 		return closeInjector(result);
 	}
-	//cout << "Proccess found " << target.pid << " " << target.name << endl;
+	cout << "Proccess found " << target.pid << " " << target.name << endl;
 	result = injectDll(target.pid, dllFile);
 	return closeInjector(result);
 }
