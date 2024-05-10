@@ -5,7 +5,9 @@
 #include <stdio.h>
 #include <tchar.h>
 #include <psapi.h>
-
+#include <fcntl.h>
+#include <io.h>
+#include <fstream>
 using namespace std;
 
 struct Process {
@@ -19,8 +21,18 @@ int findProcess(Process* target, DWORD pid);
 int findProcess(Process* target, string pName);
 Process parseProcess(DWORD processID);
 int injectDll(DWORD pid, string dllLocation);
+bool RedirectConsoleIO(); // https://stackoverflow.com/a/55875595
+unique_ptr<string> getArgumentValue(string argument, int argc, char** argv);
+int getArgumentIndex(string argument, int argc, char** argv);
+bool hasArgument(string argument, int argc, char** argv, bool withValue = false);
 
 int main(int argc, char** argv) {
+	if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
+		if (hasArgument("c", argc, argv)) {
+			AllocConsole();
+		}
+	}
+	RedirectConsoleIO();
 	string dllFile = "";
 	bool byPid = false;
 	DWORD pid = 0;
@@ -30,37 +42,31 @@ int main(int argc, char** argv) {
 	if (argc == 1) {
 		return closeInjector(INJECTOR_NO_PARAMS);
 	}
-	else if (argc == 2) {
-		if (string(argv[1]) == "-h") {
-			cout << "DLLInjector.exe DLLlocation [-n process name]/[-p pid]" << endl;
+	else if (hasArgument("h", argc, argv)) {
+			cout << "DLLInjector.exe -f <.dll file location> [-n process name]/[-p pid]" << endl;
 			cout << "-h for help" << endl;
 			return closeInjector(INJECTOR_OK);
+	}
+	else if (hasArgument("f", argc, argv, true) && (hasArgument("n", argc, argv, true) || hasArgument("p", argc, argv, true))) {
+		dllFile = *getArgumentValue("f", argc, argv);
+		if (hasArgument("n", argc, argv, true)) {
+			pName = *getArgumentValue("n", argc, argv);
 		}
 		else {
-			return closeInjector(INJECTOR_INVALID_PARAMS);
-		}
-	}
-	else if (argc == 4) {
-		dllFile = string(argv[1]);
-		if (string(argv[2]) == "-n") {
-			pName = argv[3];
-		}
-		else if (string(argv[2]) == "-p") {
 			try {
-
-				pid = atoi(argv[3]);
+				pid = atoi(getArgumentValue("p", argc, argv)->c_str());
+				byPid = true;
 			}
 			catch (...) {
 				return closeInjector(INJECTOR_INVALID_PARAMS);
 			}
 		}
-		else {
-			return closeInjector(INJECTOR_INVALID_PARAMS);
-		}
 	}
 	else {
 		return closeInjector(INJECTOR_INVALID_PARAMS);
 	}
+	//cout << "bypid" << byPid << endl;
+	//cout << pid << "pid" << endl;
 	result = findProcess(&target, byPid, pid, pName);
 	if (result != 0) {
 		return closeInjector(result);
@@ -70,6 +76,72 @@ int main(int argc, char** argv) {
 	return closeInjector(result);
 }
 
+//dumb arg checker
+bool hasArgument(string argument, int argc, char** argv, bool withValue) {
+	int index = getArgumentIndex(argument, argc, argv);
+	return index != -1 && (!withValue || argc > index + 1);
+}
+
+int getArgumentIndex(string argument, int argc, char** argv) {
+	for (int i = 1; i < argc; i++) {
+		if (argv[i][0] != '-') {
+			continue;
+		}
+		string arg = string(argv[i]).substr(1);
+		if (argument == arg) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+unique_ptr<string> getArgumentValue(string argument, int argc, char** argv) {
+	int index = getArgumentIndex(argument, argc, argv);
+	if (index != -1 && argc > index + 1) {
+		return make_unique<string>(argv[index + 1]);
+	}
+	return NULL;
+}
+
+bool RedirectConsoleIO()
+{
+	bool result = true;
+	FILE* fp;
+
+	// Redirect STDIN if the console has an input handle
+	if (GetStdHandle(STD_INPUT_HANDLE) != INVALID_HANDLE_VALUE)
+		if (freopen_s(&fp, "CONIN$", "r", stdin) != 0)
+			result = false;
+		else
+			setvbuf(stdin, NULL, _IONBF, 0);
+
+	// Redirect STDOUT if the console has an output handle
+	if (GetStdHandle(STD_OUTPUT_HANDLE) != INVALID_HANDLE_VALUE)
+		if (freopen_s(&fp, "CONOUT$", "w", stdout) != 0)
+			result = false;
+		else
+			setvbuf(stdout, NULL, _IONBF, 0);
+
+	// Redirect STDERR if the console has an error handle
+	if (GetStdHandle(STD_ERROR_HANDLE) != INVALID_HANDLE_VALUE)
+		if (freopen_s(&fp, "CONOUT$", "w", stderr) != 0)
+			result = false;
+		else
+			setvbuf(stderr, NULL, _IONBF, 0);
+
+	// Make C++ standard streams point to console as well.
+	ios::sync_with_stdio(true);
+
+	// Clear the error state for each of the C++ standard streams.
+	std::wcout.clear();
+	std::cout.clear();
+	std::wcerr.clear();
+	std::cerr.clear();
+	std::wcin.clear();
+	std::cin.clear();
+
+	return result;
+}
 
 int closeInjector(int error) {
 	switch (error) {
@@ -207,7 +279,7 @@ int injectDll(DWORD pid, string dllLocation) {
 		pLibRemote, 0, NULL);
 
 	if (hThread == NULL) {
-		cout << "Failed to Create Remote Thread" << endl;
+		cout << "Failed to Create Remote Thread (" << GetLastError() << ")" << endl;
 		return INJECTOR_FAILED_TO_INJECT;
 	}
 
