@@ -27,18 +27,22 @@ int getArgumentIndex(string argument, int argc, char** argv);
 bool hasArgument(string argument, int argc, char** argv, bool withValue = false);
 
 int main(int argc, char** argv) {
-	if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
-		if (hasArgument("c", argc, argv)) {
-			AllocConsole();
-		}
-	}
-	RedirectConsoleIO();
+	bool console = false;
 	string dllFile = "";
 	bool byPid = false;
 	DWORD pid = 0;
 	string pName;
 	Process target;
 	int result;
+	if (!(console = AttachConsole(ATTACH_PARENT_PROCESS))) {
+		if (hasArgument("c", argc, argv)) {
+			console = AllocConsole();
+		}
+	}
+	if (console) {
+		RedirectConsoleIO();
+	}
+
 	if (argc == 1) {
 		return closeInjector(INJECTOR_NO_PARAMS);
 	}
